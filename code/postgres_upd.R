@@ -42,7 +42,7 @@ for(nt in new_table){
   print(nt)
   
 }
-# dbRemoveTable(con, tn)
+# dbRemoveTable(con, 'index_stg')
 
 
 ### Add data to table

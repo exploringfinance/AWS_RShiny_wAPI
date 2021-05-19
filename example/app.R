@@ -1,10 +1,39 @@
-library(shiny)
+###########################
+# File: app.R in example
+# Description: Pull a quick chart of data for multiple indexes
+# Date: 5/19/2021
+# Author: Exploring Finance
+# Notes: Needs the API to be running in order to use the API pull
+# To do: 
+###########################
 
-# Define UI for slider demo app ----
+# Load Libraries
+library(RPostgres)
+library(shiny)
+library(dplyr)
+library(plotly)
+library(httr)
+
+# Connect o database
+con <- dbConnect(RPostgres::Postgres(),dbname = 'rstudio', 
+                 host = 'localhost', # i.e. 'ec2-54-83-201-96.compute-1.amazonaws.com'
+                 port = 5432, # or any other port specified by your DBA
+                 user = 'rstudio',
+                 password = 'rstudio')
+
+
+# Make initial pull from database
+res0 <- dbSendQuery(con, "SELECT * FROM index")
+res <- dbFetch(res0) %>% as_tibble()
+dbClearResult(res0)
+
+
+# Define UI 
 ui <- fluidPage(
   
   # App title ----
-  titlePanel("Sliders"),
+  titlePanel("Compare Index Performance"),
+  
   
   # Sidebar layout with input and output definitions ----
   sidebarLayout(
@@ -12,74 +41,90 @@ ui <- fluidPage(
     # Sidebar to demonstrate various slider options ----
     sidebarPanel(
       
-      # Input: Simple integer interval ----
-      sliderInput("integer", "Integer:",
-                  min = 0, max = 1000,
-                  value = 500),
+      # Input: Select Indexes  ----
+      selectInput('index','Select Index',choices = unique(res$symbol), selected = unique(res$symbol)[1], multiple = TRUE),
       
-      # Input: Decimal interval with step value ----
-      sliderInput("decimal", "Decimal:",
-                  min = 0, max = 1,
-                  value = 0.5, step = 0.1),
+      # Input: Set Date Range  ----
+      dateRangeInput('dtrng','Select Date Range',start = '2000-01-01',end = Sys.Date()),
+      helpText('Data is only available monthly'),
       
-      # Input: Specification of range within an interval ----
-      sliderInput("range", "Range:",
-                  min = 1, max = 1000,
-                  value = c(200,500)),
+      # Input: Choose data Source  ----
+      radioButtons('dbapi','Choose where to source data', choices = c('Postgres','API')),
+      helpText('In order to pull from the API, it has to be running on this server'),
       
-      # Input: Custom currency format for with basic animation ----
-      sliderInput("format", "Custom Format:",
-                  min = 0, max = 10000,
-                  value = 0, step = 2500,
-                  pre = "$", sep = ",",
-                  animate = TRUE),
+      # Input: Enter IP Address ----
+      textInput('ipaddr','Enter your IP address if you pull from the API',
+                placeholder = 'http://ec1-23-456-78-90.compute-1.amazonaws.com'),
+      helpText('Be sure to end the IP address as if it is expecting a colon, similar to the placeholder'),
       
-      # Input: Animation with custom interval (in ms) ----
-      # to control speed, plus looping
-      sliderInput("animation", "Looping Animation:",
-                  min = 1, max = 2000,
-                  value = 1, step = 10,
-                  animate =
-                    animationOptions(interval = 300, loop = TRUE))
-      
-    ),
+      # Action button for refresh
+      actionButton('refresh','Refresh Data')),
     
     # Main panel for displaying outputs ----
     mainPanel(
       
-      # Output: Table summarizing the values entered ----
-      tableOutput("values")
+      # Output: Plot summary ----
+      plotlyOutput("plot")
       
-    )
+    ))
   )
-)
+
 
 # Define server logic for slider examples ----
 server <- function(input, output) {
   
-  # Reactive expression to create data frame of all input values ----
-  sliderValues <- reactive({
+  # Oberve Event for data pull ----
+  observeEvent(input$refresh,{
     
-    data.frame(
-      Name = c("Integer",
-               "Decimal",
-               "Range",
-               "Custom Format",
-               "Animation"),
-      Value = as.character(c(input$integer,
-                             input$decimal,
-                             paste(input$range, collapse = " "),
-                             input$format,
-                             input$animation)),
-      stringsAsFactors = FALSE)
+    # symlist = c('SP','Dow'); st_dt = '2000-01-01'; end_dt = Sys.Date()
+    symlist = input$index; st_dt = input$dtrng[1]; end_dt = input$dtrng[2]
     
+    # Use API and plug in IP address if selected
+    if(input$dbapi == 'API'){
+    
+      ipaddr = input$ipaddr
+      apidt = GET(paste0(ipaddr,':8000/data?sym=',paste0(unique(res$sym_short),collapse = ',')))
+      res = bind_rows(lapply(content(apidt),as.data.frame))
+      
+    } else {
+      
+      res0 <- dbSendQuery(con, "SELECT * FROM index")
+      res <- dbFetch(res0) %>% as_tibble()
+      dbClearResult(res0)
+      
+    }
+    
+    
+    # Wrangle the Result
+    res %>%
+      arrange(symbol,date) %>%
+      group_by(symbol) %>%
+      mutate(date = as.Date(date),
+             return = ifelse(is.na(lag(value)),0,log(value/lag(value)))) %>%
+      filter(symbol %in% symlist, date >= st_dt, date <= end_dt) %>%
+      mutate(cumreturn = exp(cumsum(return))-1) -> plot_return
+    
+    # Plot the output
+    output$plot = renderPlotly({
+      
+      plot_ly(plot_return) %>%
+        add_trace(x = ~date, y = ~cumreturn, color = ~symbol, type = 'scatter', mode = 'lines', hoverinfo = 'text',
+                  text = ~paste0(date,
+                                 '\n',symbol,
+                                 '\nMonth Return: ',paste0(round(return*100,2),'%'),
+                                 '\nCum Return: ',paste0(round(cumreturn*100,2),'%'))) %>%
+        layout(title = 'Compare Cumulative Returns of selected indexes',
+               hovermode = 'x-unified',
+               legend = list(orientation = "h"),
+               # barmode = 'overlay',
+               margin = list(l = 75, r = 75, b = 100, t = 50, pad = 4),
+               xaxis = list(title=''),
+               yaxis = list(title='Cumulative Return', tickformat = '.1%'))
+      
+      
+    })
+
   })
-  
-  # Show the values in an HTML table ----
-  output$values <- renderTable({
-    sliderValues()
-  })
-  
 }
 
 # Create Shiny app ----

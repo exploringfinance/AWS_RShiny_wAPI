@@ -1,24 +1,10 @@
-# AWS_RShiny_wAPI
-Simple steps to set up an AWS server that can host an analytics dashboard and an API
-
 ---
 title: "Setting up an AWS analytics server and API in 15 minutes"
 description: |
   The steps to stand up an AWS server that can be used to host an analytics dashboard
-  and/or a data feed API for FREE
-author:
-  - name: Exploring Finance
-    url: https://exploringfinance.github.io/
+  and/or a data feed API
 date: 05-17-2021
-output:
-  distill::distill_article:
-    self_contained: false
 ---
-
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
-```
 
 ## Introduction
 
@@ -38,13 +24,14 @@ I will link to detailed instructions for all of these steps, but will provide so
 
 AWS has incredible documentation across the website and includes how to [Launch an Amazon EC2 Instance](https://docs.aws.amazon.com/quickstarts/latest/vmlaunch/step-1-launch-instance.html). 
 
-Once you [create an AWS account](https://portal.aws.amazon.com/billing/signup), you can quickly launch an EC2 server from the [dashboard](https://console.aws.amazon.com/ec2/v2/home). Rstudio does have an AMI that already has RStudio Server already installed, but this will start with a clean install of Ubuntu. From AWS eC2 dashbord:
+Once you [create an AWS account](https://portal.aws.amazon.com/billing/signup), you can quickly launch an EC2 server from the [dashboard](https://console.aws.amazon.com/ec2/v2/home). Rstudio does have an AMI that already has RStudio Server already installed, but this will start with a clean install of Ubuntu. From AWS eC2 dashboard:
 
 * Click Launch Instance
 * Select Ubuntu Server 20.04 LTS (about 6-10 options down)
   * Make sure to keep the default x86 because the ARM chips do not work with Rstudio Server
-* Start by using t3a.small to handle all the installations
-  * After the installs, you can switch back to the free tier (t2.micro)
+* Start by using at least t3a.micro to handle all the installations, but a t3a.small or t3a.medium will speed things up. You can then revert back to a micro.
+  * The free tier (t2.micro) is unable to handle all the installations and server hosting
+  * Do not use a t4 server. These are only offered in ARM which do not work with Rstudio
 * Click Review and Launch
   * We will revisit the Security Groups later, so don't change anything here
   * I would increase the storage size up to 10 gbs to account for Docker
@@ -95,6 +82,7 @@ You are now ready to install the software. We are going to perform the following
   * Once you install Rstudio verify the installation by visiting the site. Get the external IP address from the AWS Instance dashboard and add :8787. For example: http://ec1-2-34-567-890.compute-1.amazonaws.com:8787
   * This will not work unless you modified the security groups as explained above
 * [Install Shiny Server](https://www.rstudio.com/products/shiny/download-server/ubuntu/)
+  * Verify the installation by visiting a sample address: http://ec1-2-34-567-890.compute-1.amazonaws.com:3838/sample-apps/hello/
 * [Install PostgresSQL](https://www.digitalocean.com/community/tutorials/how-to-install-postgresql-on-ubuntu-20-04-quickstart)
 * [Install Docker](https://linuxize.com/post/how-to-install-and-use-docker-on-ubuntu-20-04/)
 
@@ -120,12 +108,18 @@ sudo su - -c "R -e \"install.packages('shiny', repos='https://cran.rstudio.com/'
 wget https://download3.rstudio.org/ubuntu-14.04/x86_64/shiny-server-1.5.16.958-amd64.deb
 sudo gdebi shiny-server-1.5.16.958-amd64.deb
 
-# Install PostresSQL database and create super user
+# Install PostresSQL database and create super user with database
 sudo apt install postgresql postgresql-contrib
 sudo -u postgres createuser --interactive
   Enter name of role to add: rstudio
   Shall the new role be a superuser? (y/n) y
+sudo -u postgres createdb rstudio
+# we will need to change the password to work with the scripts
+psql
+ALTER ROLE rstudio WITH PASSWORD 'rstudio';
+\q
 
+# Now we will enter 
 
 # Install Docker
 sudo apt install apt-transport-https ca-certificates curl gnupg-agent software-properties-common
@@ -136,19 +130,92 @@ sudo apt install docker-ce docker-ce-cli containerd.io
 
 ```
 
-## Hosting a Shiny App
+## Housting a data API
 
-The next step will be to ensure that Shiny is working. The first step is to clone my Git repository to get a sample application. You will then need to move the sample application to the Shiny Server. Once this has been completed, you should be able to test and make sure the app is running.
+In order to host a data API, you will first need to collect some data to host. We are going to scrape some financial data from [https://www.investing.com/](https://www.investing.com/). I have already written a script to scrape down data for a few indexes and commodities. You will need to copy down my git repo. Make sure to be in your home directory and then clone the repo down. You will also need to install some more R libraries which could take a few minutes. Again, this will go faster with a t3a.small or t3a.medium. 
+
 
 ```
+
+# Install Linux Libraries for dependencies on R packages
+sudo apt-get update -y
+sudo apt-get install -y libssl-dev
+sudo apt-get install -y libcurl4-openssl-dev
+sudo apt-get install -y libxml2-dev
+sudo apt-get install -y libpq-dev
+
+# Install necessary R packages
+sudo su - -c "R -e \"install.packages(c('httr','tidyverse','RPostgres'))\""
+
 # Clone Git Repo
 cd
 git clone https://github.com/exploringfinance/AWS_RShiny_wAPI.git
 
-# Copy App Folder to Shiny Server
+# Run R script to download data. This will also save data to a folder for loading data into the database.
+/usr/bin/Rscript /home/rstudio/AWS_RShiny_wAPI/code/IndexPull.R
 
+# Sweep data into database - will create tables if none exist
+/usr/bin/Rscript /home/rstudio/AWS_RShiny_wAPI/code/postgres_upd.R
+
+# Setup cron to scrape data automatically and sweep to database
+crontab -e
+
+# Press i and then copy these two lines at the bottom of the cron file. 
+# They will run twice daily to scrape and sweep 
+00 12,22 * * * /usr/bin/Rscript /home/rstudio/AWS_RShiny_wAPI/code/IndexPull.R
+10 12,22 * * * /usr/bin/Rscript /home/rstudio/AWS_RShiny_wAPI/code/postgres_upd.R
 
 
 ```
 
+Now that you have the data stored down. We can setup a docker container that can host the API which would feed your custom Shiny App. In theory, this is extra steps, the Shiny App can be configured to read from the database or read in local files, but if you wanted to host the API or Shiny App on different machines, this is one option. 
+
+Below, we are going to pull a docker container and then start the container using a custom docker file. Detailed instructions can be found [here](https://www.rplumber.io/index.html).
+
+```
+
+# Pull Docker File
+sudo systemctl start docker
+sudo docker pull rstudio/plumber
+
+# If you cloned my git repo, the command below should start a custom docker container
+sudo docker build -t customdock /home/rstudio/AWS_RShiny_wAPI/plumber_api/
+sudo docker run --rm -p 8000:8000 -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
+
+# Test that the API is now working. Enter the link below into a browser with your IP
+http://ec1-23-456-789.compute-1.amazonaws.com:8000/data?sym=SP,Dow
+
+# You will want to close the terminal in order to keep the API open (do not hit ctrl+c)
+# Open a new terminal window and confirm API container is still up
+sudo docker ps
+
+
+```
+
+
+## Hosting a Shiny App
+
+Now that Shiny is working, the API is up, and the database is running with data populated, we will set up a Shiny app that pulls from the database but can be redirected to pull from the API. I have already built the Shiny app so if you run the commands below, everything should work. This is a very simple app with a single chart and some drop downs to choose from. 
+
+
+```
+# Install Plotly
+sudo su - -c "R -e \"install.packages(c('plotly'))\""
+
+# Copy the App to the Shiny Server
+sudo cp -rf /home/rstudio/AWS_RShiny_wAPI/example/ /srv/shiny-server/
+
+# Visit your app to make sure it is running
+http://ec1-2-34-567-890.compute-1.amazonaws.com:3838/example
+
+# If there are any issues, you can check the logs
+cd /var/log/shiny-server
+ls
+sudo more ENTER LOG FILE
+
+```
+
+## Wrapping up
+
+Congratulations! You have now stood up an AWS Server, created a database, web scraped some data, set up an API, and launched a dashboard. This is only scratching the surface of the amazing features that can be explored with any of these capabilities. Hopefully this gave you a foundation to get started!
 

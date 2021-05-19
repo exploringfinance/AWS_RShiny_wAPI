@@ -38,10 +38,10 @@ get_index = function(index_id){
 
 # Apply function to list of indexes
 all_index = bind_rows(lapply(index_list,get_index)) %>%
-  mutate(prim_key = paste0(symbol,date))
-
+  mutate(prim_key = paste0(symbol,date),
+         sym_short = gsub(' .*','',gsub("[[:punct:]]", "", symbol)))
 
 # Save Index data to be swept to database and docker file
-saveRDS(all_index,'/home/rstudio/AWS_RShiny_wAPI/plumber_api/api/index.rds')
+saveRDS(all_index,'/home/rstudio/AWS_RShiny_wAPI/plumber_api/app/index.rds')
 saveRDS(all_index,'/home/rstudio/AWS_RShiny_wAPI/db_stg/index.rds')
 

@@ -9,8 +9,8 @@ function() {
   # data = readRDS('/home/rstudio/AWS_RShiny_wAPI/plumber_api/app/index.rds')
   data = readRDS('/app/index.rds')
   
-  syms = unique(data$symbol)
-  gsub(' .*','',gsub("[[:punct:]]", "", syms))
+  unique(data$sym_short)
+
 }
 
 #* Historical Pull for Symbol
@@ -23,9 +23,8 @@ function(sym = 'SP') {
   data = readRDS('/app/index.rds')
   
   data %>%
-    mutate(sym_short = gsub(' .*','',gsub("[[:punct:]]", "", symbol))) %>%
-    filter(sym_short == sym)
-  
+    filter(tolower(sym_short) %in% tolower(strsplit(sym,',')[[1]]))
+
   # jsonlite::toJSON(jsonprep)
   
 }
