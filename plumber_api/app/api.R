@@ -1,6 +1,6 @@
 
-# sudo docker run --rm -p 8000:8000 -v `pwd`AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R 
-
+# sudo docker run --rm -p 8000:8000 -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
+# sudo docker run -p 8000:8000 -dit --restart=unless-stopped -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
 
 #* List of Symbols
 #* @get /symbols
