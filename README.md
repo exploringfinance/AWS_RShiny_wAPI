@@ -182,6 +182,9 @@ sudo docker pull rstudio/plumber
 sudo docker build -t customdock /home/rstudio/AWS_RShiny_wAPI/plumber_api/
 sudo docker run --rm -p 8000:8000 -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
 
+# You can also run this command to always keep the API Running
+sudo docker run -p 8000:8000 -dit --restart=unless-stopped -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
+
 # Test that the API is now working. Enter the link below into a browser with your IP
 http://ec1-23-456-789.compute-1.amazonaws.com:8000/data?sym=SP,Dow
 
