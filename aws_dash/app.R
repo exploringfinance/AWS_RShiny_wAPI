@@ -3,8 +3,8 @@
 # Description: Chart of AWS Cost Data
 # Date: 5/19/2021
 # Author: Exploring Finance
-# Notes: 
-# To do: 
+# Notes: http://ec2-54-158-91-129.compute-1.amazonaws.com:3838/aws_dash
+# To do: sudo cp -rf /home/rstudio/AWS_RShiny_wAPI/aws_dash/ /srv/shiny-server/
 ###########################
 
 # Load Libraries
@@ -15,6 +15,7 @@ library(plotly)
 library(httr)
 library(reactable)
 library(lubridate)
+library(RJDBC)
 
 # Connect o database
 con <- dbConnect(RPostgres::Postgres(),dbname = 'rstudio', 
@@ -99,7 +100,18 @@ ui <- fluidPage(
                           # Output: Plot summary ----
                           plotlyOutput("plot")
                           
-                        )))
+                        ))),
+             tabPanel('RedShift',
+                      p('The data below will be queried when you press "Pull From Redshift". The data was sourced from the ',
+                        'Redshift ticket sales data ',
+                        a('example',href = 'https://docs.aws.amazon.com/redshift/latest/gsg/rs-gsg-create-sample-db.html'),
+                        ' that is posted online. The data was loaded ',
+                        'into a personal Redshift Cluster. The SQL queries are run in R against the cluster using a JDBC connection. ',
+                        'These charts were originally genreated using Amazon Quicksight, but could not be easily shared. The plots were ',
+                        'recreated in R using Plotly.'),
+                      actionButton('redshiftpull','Pull From Redshift'),
+                      hr(),plotlyOutput('totalsales'),
+                      hr(),plotlyOutput('avgsales'))
   ))
 
 
@@ -277,6 +289,68 @@ server <- function(input, output, session) {
   })
   
 })
+  
+  #### Redshift pull
+  
+  observeEvent(input$redshiftpull,{
+    
+    driver <- JDBC("com.amazon.redshift.jdbc41.Driver", "Data/RedshiftJDBC41-1.1.9.1009.jar", identifier.quote="`")
+    url = 'jdbc:redshift://redshift-cluster-1.cikludf6uwyl.us-east-1.redshift.amazonaws.com:5439/dev?user=awsuser&password=Awsuser1'
+    conn <- dbConnect(driver, url)
+    
+    salesum = dbGetQuery(conn, '
+              with sls as (select 
+              eventid,
+              sum(pricepaid) as totalsales,
+              sum(commission) as totalcomm,
+              sum(qtysold) as totalqty
+              from public.sales
+              group by eventid),
+              slsev as (
+              select 
+              sls.*,
+              ev.eventname,
+              ve.*
+              from sls as sls
+              left join event ev
+              on ev.eventid = sls.eventid
+              left join venue ve
+              on ev.venueid = ve.venueid) 
+              select 
+              venuestate,
+              sum(totalsales) as Sales,
+              count(eventid) as count,
+              sum(totalqty) as quantity,
+              sum(totalsales)/sum(totalqty) as avgprice
+              from slsev
+              group by venuestate')
+    
+    output$totalsales = renderPlotly({
+    plot_ly(salesum) %>%
+      add_trace(x = ~venuestate, y=~sales, type = 'bar') %>%
+      layout(title = 'Total Sales by State',
+             hovermode = 'x-unified',
+             legend = list(orientation = "h"),
+             # barmode = 'overlay',
+             margin = list(l = 75, r = 75, b = 100, t = 50, pad = 4),
+             xaxis = list(title='State'),
+             yaxis = list(title='Total Sales'))
+    })
+    
+    output$avgsales = renderPlotly({
+    
+    plot_ly(salesum) %>%
+      add_trace(x = ~venuestate, y=~avgprice, type = 'bar') %>%
+      layout(title = 'Average Ticket Price by State',
+             hovermode = 'x-unified',
+             legend = list(orientation = "h"),
+             # barmode = 'overlay',
+             margin = list(l = 75, r = 75, b = 100, t = 50, pad = 4),
+             xaxis = list(title='State'),
+             yaxis = list(title='Average Ticker Price'))
+    
+    })
+  })
   
 
  
