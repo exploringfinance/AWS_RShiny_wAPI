@@ -44,4 +44,4 @@ all_index = bind_rows(lapply(index_list,get_index)) %>%
 # Save Index data to be swept to database and docker file
 saveRDS(all_index,'/home/rstudio/AWS_RShiny_wAPI/plumber_api/app/index.rds')
 saveRDS(all_index,'/home/rstudio/AWS_RShiny_wAPI/db_stg/index.rds')
-
+source('/home/rstudio/AWS_RShiny_wAPI/code/postgres_upd.R')

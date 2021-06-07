@@ -1,10 +1,14 @@
 ---
-title: "Setting up an AWS analytics server and API in 15 minutes"
+title: "Setting up an AWS analytics server and API in minutes"
 description: |
   The steps to stand up an AWS server that can be used to host an analytics dashboard
   and/or a data feed API
-date: 05-17-2021
 ---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
 
 ## Introduction
 
@@ -15,10 +19,10 @@ In a [previous post](https://exploringfinance.github.io/posts/2020-11-14-automat
   * R, RStudio, Shiny Server, Postgres DB, and Docker
   * Securing the server (1 minute)
   * Configuring the software (1 minute)
-* Hosting a very basic Shiny App (2 minutes)
 * Creating a data feed API (3 minutes)
+* Hosting a very basic Shiny App (2 minutes)
 
-I will link to detailed instructions for all of these steps, but will provide some basic steps that a technical user can follow.
+The biggest time constraing is the time it akes to install the software. I will link to detailed instructions for all of these steps, but will provide some basic steps that a technical user can follow.
 
 ## Setting up an AWS Server
 
@@ -74,6 +78,8 @@ Before going to the next step for installation. We want to open some ports to ma
   * For Shiny Server
 * Custom TCP - Port Range 8000 and enter 0.0.0.0/0 next to Custom
   * For Docker and Plumber (the API)
+* Custom TCP - Port Range 5432 and enter 0.0.0.0/0 next to Custom
+  * For remote connection to the Postgres DB
 
 You are now ready to install the software. We are going to perform the following steps. The links to detailed instructions are provided. The actual installs may take a few minutes.
 
@@ -119,8 +125,6 @@ psql
 ALTER ROLE rstudio WITH PASSWORD 'rstudio';
 \q
 
-# Now we will enter 
-
 # Install Docker
 sudo apt install apt-transport-https ca-certificates curl gnupg-agent software-properties-common
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
@@ -130,7 +134,7 @@ sudo apt install docker-ce docker-ce-cli containerd.io
 
 ```
 
-## Housting a data API
+## Hosting a data API
 
 In order to host a data API, you will first need to collect some data to host. We are going to scrape some financial data from [https://www.investing.com/](https://www.investing.com/). I have already written a script to scrape down data for a few indexes and commodities. You will need to copy down my git repo. Make sure to be in your home directory and then clone the repo down. You will also need to install some more R libraries which could take a few minutes. Again, this will go faster with a t3a.small or t3a.medium. 
 
@@ -155,6 +159,7 @@ git clone https://github.com/exploringfinance/AWS_RShiny_wAPI.git
 /usr/bin/Rscript /home/rstudio/AWS_RShiny_wAPI/code/IndexPull.R
 
 # Sweep data into database - will create tables if none exist
+mkdir /home/rstudio/AWS_RShiny_wAPI/db_stg
 /usr/bin/Rscript /home/rstudio/AWS_RShiny_wAPI/code/postgres_upd.R
 
 # Setup cron to scrape data automatically and sweep to database
@@ -180,16 +185,16 @@ sudo docker pull rstudio/plumber
 
 # If you cloned my git repo, the command below should start a custom docker container
 sudo docker build -t customdock /home/rstudio/AWS_RShiny_wAPI/plumber_api/
+cd
 sudo docker run --rm -p 8000:8000 -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
-
-# You can also run this command to always keep the API Running
-sudo docker run -p 8000:8000 -dit --restart=unless-stopped -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
 
 # Test that the API is now working. Enter the link below into a browser with your IP
 http://ec1-23-456-789.compute-1.amazonaws.com:8000/data?sym=SP,Dow
 
-# You will want to close the terminal in order to keep the API open (do not hit ctrl+c)
-# Open a new terminal window and confirm API container is still up
+# You can run this command to always keep the API Running
+sudo docker run -p 8000:8000 -dit --restart=unless-stopped -v `pwd`/AWS_RShiny_wAPI/plumber_api/app:/app customdock /app/api.R
+
+# Confirm API container is still up
 sudo docker ps
 
 
@@ -218,7 +223,13 @@ sudo more ENTER LOG FILE
 
 ```
 
+## Connecting to the Postgres Database
+
+Assuming port 5432 was opened to all IPs, there are still some changes to the Postgres configuration files in order to connect to the database with a tool like DB Visualizer. First go to the postgresql.conf file. This can be found in /etc/postgresql/12/main (or whichever version is installed instead of 12). Change the listen address to '\*' to allow for all connections. This can be done by entering 'sudo vi postgresql.conf' and going to CONNECTIONS AND AUTHENTICATION. Uncomment the listen_addresses and change localhost to '\*'. Save and close the file.
+
+Next go into pg_hba.conf and enter in 'host  all  all 0.0.0.0/0 md5' under the first line that calls for TYPE DATABADE USER ADDRESS METHOD. Once saved you need to restart the database (service postgresql restart) and you can then connect from an outside source with proper login information. 
+
 ## Wrapping up
 
-Congratulations! You have now stood up an AWS Server, created a database, web scraped some data, set up an API, and launched a dashboard. This is only scratching the surface of the amazing features that can be explored with any of these capabilities. Hopefully this gave you a foundation to get started!
+Congratulations! You have now stood up an AWS Server, created and connected to a database, web scraped some data, set up an API, and launched a dashboard. This is only scratching the surface of the amazing features that can be explored with any of these capabilities. Hopefully this gave you a foundation to get started!
 
